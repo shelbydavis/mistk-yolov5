@@ -201,7 +201,7 @@ class YOLOv5Model (AbstractModel):
             
             for det in pred :
                 if len(det) > 0:
-                    det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], (3, im0s.width, im0s.height)).round()
+                    det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], (im0s.width, im0s.height)).round()
                     for *xyxy, conf, cls in reversed(det):
                         predictions[key].append(
                             {"image" : key,
