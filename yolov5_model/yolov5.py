@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import base64
 import os
 import json, pandas, logging
 
@@ -166,12 +167,50 @@ class YOLOv5Model (AbstractModel):
             for result in self._predictions:
                 writer.writerow(result)
                 
-    def do_stream_predict(self, data_map: dict):
+    def do_stream_predict(self, data_map: dict, details: bool=False):
         logger.info("do_stream_predict called")
         logger.info("Stream prediction based on: " + json.dumps(data_map))
         predictions = {}
-        
-        # code to do streaming predictions here based on data_map
+        stride, names, pt = self._model.stride, self._model.names, self._model.pt
+        dt = (Profile(), Profile(), Profile())
+        conf_thres=0.25,  # confidence threshold
+        iou_thres=0.45,  # NMS IOU threshold
+        import io
+        from PIL import Image
+        import numpy
+        imgsz=(640, 640)
+        for (key, data) in data_map.items() :
+            im0s = Image.open(io.BytesIO(base64.b64decode(data)))
+            im = numpy.asarray(im0s.resize(imgsz))
+            im = numpy.moveaxis(im, -1,0 )
+
+            predictions[key] = []
+            with dt[0]:
+                im = torch.from_numpy(im).to(self._model.device)
+                im = im.float()
+                im /= 255  # 0 - 255 to 0.0 - 1.0
+                if len(im.shape) == 3:
+                    im = im[None]  # expand for batch dim
+            # Inference
+            with dt[1]:
+                pred = self._model(im, augment=False, visualize=False)
+
+            # NMS
+            with dt[2]:
+                pred = non_max_suppression(pred, 0.25, 0.45, None, False, max_det=1000)
+            
+            for det in pred :
+                if len(det) > 0:
+                    det[:, :4] = scale_boxes(im.shape[2:], det[:, :4], (3, im0s.width, im0s.height)).round()
+                    for *xyxy, conf, cls in reversed(det):
+                        predictions[key].append(
+                            {"image" : key,
+                                "label" : self._model.names[int(cls)],
+                                "confidence" : float(conf),
+                                "x0"    : int(xyxy[0]),
+                                "y0"    : int(xyxy[1]),
+                                "x1"    : int(xyxy[2]),
+                                "y1"    : int(xyxy[3])})
         
         return predictions
 
